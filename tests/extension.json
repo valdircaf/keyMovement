@@ -1,0 +1,15 @@
+{
+    "title": "Seta - Movimento com Teclado e Mouse",
+    "description": "Use as setas do teclado para mover o avatar a partir da posição atual. Clique no quarto para definir nova posição.",
+    "version": "1.0",
+    "author": "Valdir",
+    "filename": "key_movement.py",
+    "cookie": "key-movement-extension",
+    "canLeave": true,
+    "canDelete": true,
+    "isInstalledExtension": false,
+    "executablePath": "python",
+    "executableArguments": ["key_movement.py", "--port", "{port}"],
+    "categories": ["Movement", "Utility"],
+    "framework": "G-Python"
+}
