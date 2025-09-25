@@ -4,7 +4,34 @@ import threading
 from g_python.gextension import Extension
 from g_python.hmessage import Direction, HMessage
 from g_python.hpacket import HPacket
-from g_python.hparsers import HHeightMap, HUserUpdate
+
+# Import classes individually to avoid circular import issues
+try:
+    from g_python.hparsers import HHeightMap, HUserUpdate
+except ImportError:
+    # Fallback: define minimal classes if import fails
+    class HHeightMap:
+        def __init__(self, packet):
+            try:
+                self.width, tileCount = packet.read('ii')
+                self.height = int(tileCount / self.width)
+                self.tiles = [packet.read_short() for _ in range(tileCount)]
+            except:
+                self.width = 20
+                self.height = 20
+                self.tiles = []
+        
+        def index_to_coords(self, index):
+            y = int(index % self.width)
+            x = int((index - y) / self.width)
+            return x, y
+        
+        def is_room_tile(self, x, y):
+            return 0 <= x < self.width and 0 <= y < self.height
+    
+    class HUserUpdate:
+        def __init__(self, packet):
+            pass
 
 try:
     from pynput import keyboard, mouse
