@@ -60,8 +60,45 @@ room_width = 20
 room_height = 20  
 room_detected = False
 
+def initial_position(message):
+    """Captura a posição inicial do avatar"""
+    global current_x, current_y, avatar_position_updated, room_width, room_height
+    
+    try:
+        packet = message.packet
+        
+        # Ler a posição inicial do avatar
+        x = packet.read_int()
+        y = packet.read_int()
+        
+        # Validar se as coordenadas estão dentro dos limites do quarto
+        if room_width > 0 and room_height > 0:
+            if 0 <= x < room_width and 0 <= y < room_height:
+                current_x = x
+                current_y = y
+                avatar_position_updated = True
+                print(f"✓ Posição inicial do avatar: ({x}, {y}) no quarto {room_width}x{room_height}")
+            else:
+                print(f"⚠ Posição inicial ({x}, {y}) fora dos limites do quarto {room_width}x{room_height}, usando posição padrão")
+                # Usar posição segura no centro do quarto
+                current_x = min(10, room_width // 2)
+                current_y = min(10, room_height // 2)
+                avatar_position_updated = True
+        else:
+            # Se ainda não temos dimensões do quarto, armazenar temporariamente
+            current_x = x
+            current_y = y
+            avatar_position_updated = True
+            print(f"✓ Posição inicial temporária: ({x}, {y}) - aguardando detecção do quarto")
+            
+    except Exception as e:
+        print(f"✗ Erro ao capturar posição inicial: {e}")
+        import traceback
+        traceback.print_exc()
+
 def capture_move_position(message):
-    global current_x, current_y, avatar_position_updated
+    """Captura a posição quando o avatar se move"""
+    global current_x, current_y, avatar_position_updated, room_width, room_height
     
     try:
         packet = message.packet
@@ -69,55 +106,49 @@ def capture_move_position(message):
         x = packet.read_int()
         y = packet.read_int()
         
-        current_x = x
-        current_y = y
-        avatar_position_updated = True
-        
+        # Validar coordenadas antes de atualizar
+        if room_width > 0 and room_height > 0:
+            if 0 <= x < room_width and 0 <= y < room_height:
+                current_x = x
+                current_y = y
+                avatar_position_updated = True
+                print(f"✓ Avatar movido para: ({x}, {y})")
+            else:
+                print(f"⚠ Movimento para ({x}, {y}) fora dos limites do quarto {room_width}x{room_height}")
+        else:
+            # Se ainda não temos dimensões, armazenar temporariamente
+            current_x = x
+            current_y = y
+            avatar_position_updated = True
+            
     except Exception as e:
-        print(f"Erro ao capturar posição: {e}")
-
-def initial_position(message):
-    global current_x, current_y, avatar_position_updated
-    
-    packet = message.packet
-    
-    packet_bytes = packet.bytearray
-    packet_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in packet_bytes)
-    
-    if "/mv" in packet_str:
-        try:
-            mv_index = packet_str.find("/mv")
-            if mv_index > 0:
-                coords_str = packet_str[mv_index+4:].split("//")[0]
-                coords = coords_str.split(",")
-                if len(coords) >= 2:
-                    x, y = int(float(coords[0])), int(float(coords[1]))
-                    
-                    current_x, current_y = x, y
-                    avatar_position_updated = True
-                    
-        except Exception as e:
-            print(f"Erro ao capturar posição: {e}")
+        print(f"✗ Erro ao capturar movimento: {e}")
+        import traceback
+        traceback.print_exc()
 
 def detect_room_dimensions(message):
-    """Detecta as dimensões do quarto através do HeightMap"""
     global room_width, room_height, room_detected
     
     try:
-        height_map = HHeightMap(message.packet)
+        packet = message.packet
         
-        if hasattr(height_map, 'width') and hasattr(height_map, 'height'):
-            hm_width = height_map.width
-            hm_height = height_map.height
+        hm_width = packet.read_int()
+        hm_height = packet.read_int()
         
-        if hasattr(height_map, 'tiles'):
-            tiles = height_map.tiles
+        tiles_count = packet.read_int()
+        tiles = []
+        for _ in range(tiles_count):
+            tiles.append(packet.read_short())
+        
+        if hm_width > 0 and hm_height > 0:
+            height_map = HHeightMap(hm_width, hm_height, tiles)
+            
+            # Verificar se há tiles válidos
+            valid_tiles = 0
+            max_x = 0
+            max_y = 0
             
             if tiles:
-                max_x = 0
-                max_y = 0
-                valid_tiles = 0
-                
                 for i, tile in enumerate(tiles):
                      x, y = height_map.index_to_coords(i)
                      if height_map.is_room_tile(x, y):
@@ -125,18 +156,20 @@ def detect_room_dimensions(message):
                          max_y = max(max_y, y)
                          valid_tiles += 1
                 
-                real_width = max_x + 1
-                real_height = max_y + 1
+                # Use as dimensões reais baseadas nos tiles válidos
+                room_width = max_x + 1
+                room_height = max_y + 1
                 
-                if real_width != hm_width or real_height != hm_height:
-                    room_width = real_width
-                    room_height = real_height
-                else:
-                    room_width = hm_width
-                    room_height = hm_height
+                # Garantir que as dimensões são pelo menos 1x1
+                room_width = max(1, room_width)
+                room_height = max(1, room_height)
+                
+                print(f"✓ Dimensões do quarto detectadas: {room_width}x{room_height} (tiles válidos: {valid_tiles})")
             else:
+                # Fallback para as dimensões do HeightMap
                 room_width = hm_width
                 room_height = hm_height
+                print(f"✓ Usando dimensões do HeightMap: {room_width}x{room_height}")
         
         if room_width > 0 and room_height > 0:
             room_detected = True
@@ -164,10 +197,12 @@ def detect_floor_dimensions(message):
             calculated_height = len(lines)
             calculated_width = len(first_line) if first_line else 0
             
+            # Só usar FloorMap se HeightMap não foi detectado ainda
             if not room_detected and calculated_width > 0 and calculated_height > 0:
                 room_width = calculated_width
                 room_height = calculated_height
                 room_detected = True
+                print(f"✓ Dimensões detectadas via FloorMap: {room_width}x{room_height}")
         else:
             print("✗ FloorMap vazio ou inválido")
             
@@ -175,7 +210,6 @@ def detect_floor_dimensions(message):
         print(f"✗ Erro ao detectar dimensões via FloorHeightMap: {e}")
         import traceback
         traceback.print_exc()
-
 
 
 def on_click(x, y, button, pressed):
@@ -186,27 +220,34 @@ def on_click(x, y, button, pressed):
             print("Aguarde a detecção das dimensões do quarto antes de clicar.")
             return
         
-       
-        game_area_left = 100    
-        game_area_top = 100    
-        game_area_width = 800   
-        game_area_height = 600  
+        # Área do jogo ajustada - valores mais realistas
+        game_area_left = 50    
+        game_area_top = 50    
+        game_area_width = 700   
+        game_area_height = 500  
         
+        # Verificar se o clique está dentro da área do jogo
         if (x < game_area_left or x > game_area_left + game_area_width or
             y < game_area_top or y > game_area_top + game_area_height):
             return
         
+        # Calcular posição relativa dentro da área do jogo
         relative_x = x - game_area_left
         relative_y = y - game_area_top
         
+        # Calcular tamanho de cada célula
         cell_width = game_area_width / room_width
         cell_height = game_area_height / room_height
         
+        # Converter para coordenadas do quarto
         room_x = int(relative_x / cell_width)
         room_y = int(relative_y / cell_height)
         
+        # Garantir que as coordenadas estão dentro dos limites
         room_x = max(0, min(room_width - 1, room_x))
         room_y = max(0, min(room_height - 1, room_y))
+        
+        print(f"✓ Clique mapeado para coordenada ({room_x}, {room_y}) no quarto {room_width}x{room_height}")
         
         current_x = room_x
         current_y = room_y

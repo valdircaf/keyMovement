@@ -2,8 +2,8 @@ COMO USAR
 TERMINAL:
 pip install g-python
 pip install pynput
-cd tests
-python key_movement.py --port 9092
+cd extension
+python key_movement.py -p 9092
 
 # G-Python
 
