@@ -17,8 +17,8 @@ except ImportError:
                 self.height = int(tileCount / self.width)
                 self.tiles = [packet.read_short() for _ in range(tileCount)]
             except:
-                self.width = 20
-                self.height = 20
+                self.width = 60
+                self.height = 60
                 self.tiles = []
         
         def index_to_coords(self, index):
@@ -56,8 +56,8 @@ avatar_position_updated = False
 key_pressed = None
 last_move_time = 0
 
-room_width = 20  
-room_height = 20  
+room_width = 0  # Será detectado automaticamente
+room_height = 0  # Será detectado automaticamente
 room_detected = False
 
 def initial_position(message):
@@ -126,55 +126,104 @@ def capture_move_position(message):
         import traceback
         traceback.print_exc()
 
+def intercept_all_packets(message):
+    """Intercepta TODOS os packets para debug"""
+    try:
+        packet = message.packet
+        header_id = packet.header_id()
+        packet_length = len(packet.bytearray)
+        
+        # Log packets com tamanho significativo que podem ser HeightMap
+        if packet_length > 20:  # HeightMap geralmente tem dados substanciais
+            print(f"🔍 [ALL_PACKETS] Header ID: {header_id}, Length: {packet_length}")
+            
+            # Analisar TODOS os packets grandes para encontrar o correto
+            packet.reset()
+            try:
+                # Tentar ler como diferentes estruturas
+                first_int = packet.read_int()
+                second_int = packet.read_int()
+                
+                # Verificar se pode ser width, height (ao invés de width, tileCount)
+                if first_int > 10 and first_int < 200 and second_int > 10 and second_int < 200:
+                    # Pode ser width, height diretamente
+                    print(f"🎯 [POSSIBLE_ROOM_DIMENSIONS] Header {header_id}: Possível Width={first_int}, Height={second_int}")
+                    
+                    # Tentar ler o terceiro valor
+                    try:
+                        third_int = packet.read_int()
+                        print(f"🔍 [ROOM_DIMENSIONS] Header {header_id}: {first_int}, {second_int}, {third_int}")
+                        
+                        # Se o terceiro valor é aproximadamente first*second, então é width, height, tileCount
+                        if abs(third_int - (first_int * second_int)) < 10:
+                            print(f"🎯 [FOUND_CORRECT_HEIGHTMAP] Header {header_id}: Width={first_int}, Height={second_int}, TileCount={third_int}")
+                            
+                            # Atualizar dimensões globais diretamente
+                            global room_width, room_height, room_detected
+                            room_width = first_int
+                            room_height = second_int
+                            room_detected = True
+                            print(f"✅ [SUCCESS] Dimensões CORRETAS definidas: {room_width}x{room_height}")
+                            return
+                            
+                    except:
+                        pass
+                
+                # Estrutura original (width, tileCount)
+                if first_int > 0 and first_int < 200 and second_int > 0:
+                    calculated_height = int(second_int / first_int) if first_int > 0 else 0
+                    
+                    print(f"🎯 [POSSIBLE_HEIGHTMAP] Header {header_id}: Width={first_int}, TileCount={second_int}, Height={calculated_height}, Length: {packet_length}")
+                    
+                    # Se parece ser um HeightMap válido, processar apenas se não temos dimensões melhores
+                    if calculated_height > 0 and calculated_height < 200 and not room_detected:
+                        packet.reset()
+                        detect_room_dimensions(message)
+                    
+            except Exception as e:
+                pass
+                
+    except Exception as e:
+        pass
+
 def detect_room_dimensions(message):
     global room_width, room_height, room_detected
+    
+    print(f"🎯 [INTERCEPTED] HeightMap packet interceptado!")
     
     try:
         packet = message.packet
         
-        hm_width = packet.read_int()
-        hm_height = packet.read_int()
+        print(f"🔍 [DEBUG] HeightMap recebido - analisando packet...")
+        print(f"🔍 [DEBUG] Packet header ID: {packet.header_id()}")
+        print(f"🔍 [DEBUG] Packet length: {len(packet.bytearray)}")
         
-        tiles_count = packet.read_int()
+        # Reset packet position to start
+        packet.reset()
+        
+        # Usar a estrutura correta do HHeightMap
+        hm_width, tiles_count = packet.read('ii')
+        hm_height = int(tiles_count / hm_width) if hm_width > 0 else 0
+        
+        print(f"🔍 [DEBUG] Estrutura correta - Width: {hm_width}, TileCount: {tiles_count}")
+        print(f"🔍 [DEBUG] Height calculado: {hm_height}")
+        
         tiles = []
         for _ in range(tiles_count):
             tiles.append(packet.read_short())
         
-        if hm_width > 0 and hm_height > 0:
-            height_map = HHeightMap(hm_width, hm_height, tiles)
-            
-            # Verificar se há tiles válidos
-            valid_tiles = 0
-            max_x = 0
-            max_y = 0
-            
-            if tiles:
-                for i, tile in enumerate(tiles):
-                     x, y = height_map.index_to_coords(i)
-                     if height_map.is_room_tile(x, y):
-                         max_x = max(max_x, x)
-                         max_y = max(max_y, y)
-                         valid_tiles += 1
-                
-                # Use as dimensões reais baseadas nos tiles válidos
-                room_width = max_x + 1
-                room_height = max_y + 1
-                
-                # Garantir que as dimensões são pelo menos 1x1
-                room_width = max(1, room_width)
-                room_height = max(1, room_height)
-                
-                print(f"✓ Dimensões do quarto detectadas: {room_width}x{room_height} (tiles válidos: {valid_tiles})")
-            else:
-                # Fallback para as dimensões do HeightMap
-                room_width = hm_width
-                room_height = hm_height
-                print(f"✓ Usando dimensões do HeightMap: {room_width}x{room_height}")
+        print(f"🔍 [DEBUG] Primeiros 10 tiles: {tiles[:10] if len(tiles) >= 10 else tiles}")
         
-        if room_width > 0 and room_height > 0:
+        # Verificar se as dimensões são válidas
+        if hm_width > 0 and hm_height > 0:
+            room_width = hm_width
+            room_height = hm_height
             room_detected = True
+            
+            print(f"✅ [SUCCESS] Dimensões do quarto DEFINIDAS: {room_width}x{room_height}")
+            print(f"✅ [SUCCESS] Room detected: {room_detected}")
         else:
-            print("✗ Não foi possível detectar dimensões válidas do quarto")
+            print(f"❌ [ERROR] Dimensões inválidas: {hm_width}x{hm_height}")
             
     except Exception as e:
         print(f"✗ Erro ao detectar dimensões: {e}")
@@ -290,6 +339,10 @@ def process_key():
     
     if key_pressed and current_x is not None and current_y is not None:
         
+        print(f"🔍 [DEBUG] Processando tecla: {key_pressed}")
+        print(f"🔍 [DEBUG] Posição atual: ({current_x}, {current_y})")
+        print(f"🔍 [DEBUG] Dimensões do quarto: {room_width}x{room_height}")
+        
         direction_map = {
             'up': (0, -1),
             'down': (0, 1),
@@ -302,17 +355,22 @@ def process_key():
             new_x = current_x + dx
             new_y = current_y + dy
             
+            print(f"🔍 [DEBUG] Nova posição calculada: ({new_x}, {new_y})")
+            
             if 0 <= new_x < room_width and 0 <= new_y < room_height:
+                print(f"✅ [DEBUG] Movimento válido para ({new_x}, {new_y})")
                 current_x = new_x
                 current_y = new_y
                 move_avatar(current_x, current_y)
             else:
                 print(f"✗ Movimento bloqueado: posição ({new_x}, {new_y}) fora dos limites do quarto {room_width}x{room_height}")
     elif key_pressed:
-        # Se não temos posição atual, define uma posição padrão
-        if current_x is None or current_y is None:
-            current_x = 10
-            current_y = 10
+        print(f"⚠ [DEBUG] Posição atual não definida. current_x={current_x}, current_y={current_y}")
+        # Se não temos posição atual, aguardar detecção
+        if not room_detected:
+            print("⚠ Aguarde a detecção das dimensões do quarto antes de usar as setas.")
+        else:
+            print("⚠ Clique no quarto primeiro para definir a posição inicial.")
             avatar_position_updated = True
 
 def move_avatar(x, y):
@@ -342,11 +400,28 @@ def reset_position_on_extension_start():
 
 reset_position_on_extension_start()
 
+print("🚀 [INIT] Configurando interceptações...")
+
+# Interceptar TODOS os packets para debug
+ext.intercept(Direction.TO_CLIENT, intercept_all_packets)
+print("✅ [INIT] Interceptação geral configurada")
+
 ext.intercept(Direction.TO_CLIENT, detect_room_dimensions, "HeightMap")
+print("✅ [INIT] HeightMap interceptação configurada")
+
 ext.intercept(Direction.TO_CLIENT, detect_floor_dimensions, "FloorHeightMap")
+print("✅ [INIT] FloorHeightMap interceptação configurada")
+
 ext.intercept(Direction.TO_CLIENT, reset_position_on_room_change, "RoomReady")
+print("✅ [INIT] RoomReady interceptação configurada")
 
 ext.intercept(Direction.TO_SERVER, capture_move_position, "MoveAvatar")
+print("✅ [INIT] MoveAvatar interceptação configurada")
+
+# Interceptar MoveAvatar TO_CLIENT com header IDs específicos
+ext.intercept(Direction.TO_CLIENT, capture_move_position, 83)
+ext.intercept(Direction.TO_CLIENT, capture_move_position, 1982)
+print("✅ [INIT] MoveAvatar TO_CLIENT interceptações configuradas")
 
 if PYNPUT_AVAILABLE:
     keyboard_listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
