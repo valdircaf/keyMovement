@@ -58,7 +58,7 @@ if /i "%choice%"=="s" (
     echo 🐛 Executando em modo debug...
     echo    Pressione Ctrl+C para parar
     echo.
-    python key_movement.py
+    python key_movement.py -p 9092
 )
 
 echo.
