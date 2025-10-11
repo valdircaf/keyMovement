@@ -99,7 +99,7 @@ extension_active = True  # Extensão inicia ativa por padrão
 # Configuração de múltiplos cliques
 MULTIPLE_CLICKS_COUNT = 1  # Desativar múltiplos envios para evitar anti-flood
 CLICK_DELAY = 0.03  # Delay entre cliques em segundos (30ms)
-MOVE_THROTTLE_MS = 300  # Limite mínimo entre movimentos para evitar flood
+MOVE_THROTTLE_MS = 0  # Sem atraso: enviar movimentos imediatamente
 
 # Modificador para evitar capturar todas as teclas: exigir Alt pressionado
 MOVEMENT_REQUIRE_ALT = False
@@ -108,10 +108,11 @@ alt_pressed = False
 room_width = 0  # Será detectado automaticamente
 room_height = 0  # Será detectado automaticamente
 room_detected = False
+my_id = None  # Id do usuário atual (para mensagens no jogo)
 
 def initial_position(message):
     """Captura a posição inicial do avatar quando entra no quarto (via Users)."""
-    global current_x, current_y, avatar_position_updated
+    global current_x, current_y, avatar_position_updated, my_id
 
     try:
         entities = HEntity.parse(message.packet)
@@ -128,6 +129,8 @@ def initial_position(message):
             current_x = selected.tile.x
             current_y = selected.tile.y
             avatar_position_updated = True
+            if hasattr(selected, "id"):
+                my_id = selected.id
             # print(f" [SUCCESS] Posição inicial capturada: ({current_x}, {current_y})")
         else:
             # print(" [INFO] Nenhum HABBO encontrado no Users; aguardando UserUpdate")
@@ -369,7 +372,7 @@ def process_key():
     if key_pressed and current_x is not None and current_y is not None:
         # Limite de taxa: evitar enviar movimentos em sequência muito rápida
         now = time.time() * 1000
-        if (now - last_move_time) < MOVE_THROTTLE_MS:
+        if MOVE_THROTTLE_MS > 0 and (now - last_move_time) < MOVE_THROTTLE_MS:
             # print(f" [THROTTLE] Movimento ignorado: aguardando {MOVE_THROTTLE_MS}ms entre comandos")
             return
         
@@ -500,9 +503,20 @@ reset_position_on_extension_start()
 # Funções de controle da extensão (play/stop)
 def start_extension():
     """Ativar a extensão (botão play)"""
-    global extension_active
+    global extension_active, my_id
     extension_active = True
     print(" [CONTROL] Extensão ATIVADA - Mapeamento de setas habilitado")
+    # Exibir mensagem no jogo instruindo o usuário
+    try:
+        msg = "reentre no quarto e clique em uma posicao para comecar a utilizar"
+        if my_id is not None:
+            # Envia mensagem de console (mensageiro) para o próprio usuário
+            ext.send_to_client(HPacket("NewConsole", my_id, msg, 0, ""))
+        else:
+            # Se ainda não temos o id, escreve no console do G-Earth como fallback
+            ext.write_to_console(msg)
+    except Exception:
+        pass
 
 def stop_extension():
     """Parar a extensão (botão stop/x)"""
