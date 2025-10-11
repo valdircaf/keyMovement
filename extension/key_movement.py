@@ -155,7 +155,7 @@ def intercept_all_packets(message):
                 second_int = packet.read_int()
                 
                 # Verificar se pode ser width, height (ao invés de width, tileCount)
-                if first_int > 10 and first_int < 200 and second_int > 10 and second_int < 200:
+                if first_int > 5 and first_int <= 200 and second_int > 5 and second_int <= 200:
                     # Pode ser width, height diretamente
                     print(f" [POSSIBLE_ROOM_DIMENSIONS] Header {header_id}: Possível Width={first_int}, Height={second_int}")
                     
@@ -164,8 +164,8 @@ def intercept_all_packets(message):
                         third_int = packet.read_int()
                         print(f" [ROOM_DIMENSIONS] Header {header_id}: {first_int}, {second_int}, {third_int}")
                         
-                        # Se o terceiro valor é aproximadamente first*second, então é width, height, tileCount
-                        if abs(third_int - (first_int * second_int)) < 10:
+                        # Se o terceiro valor é exatamente first*second, então é width, height, tileCount
+                        if third_int == (first_int * second_int):
                             print(f" [FOUND_CORRECT_HEIGHTMAP] Header {header_id}: Width={first_int}, Height={second_int}, TileCount={third_int}")
                             
                             # Atualizar dimensões globais diretamente
@@ -180,13 +180,13 @@ def intercept_all_packets(message):
                         pass
                 
                 # Estrutura original (width, tileCount)
-                if first_int > 0 and first_int < 200 and second_int > 0:
+                if first_int > 5 and first_int <= 200 and second_int > 0:
                     calculated_height = int(second_int / first_int) if first_int > 0 else 0
                     
                     print(f" [POSSIBLE_HEIGHTMAP] Header {header_id}: Width={first_int}, TileCount={second_int}, Height={calculated_height}, Length: {packet_length}")
                     
                     # Se parece ser um HeightMap válido, processar apenas se não temos dimensões melhores
-                    if calculated_height > 0 and calculated_height < 200 and not room_detected:
+                    if calculated_height > 5 and calculated_height <= 200 and second_int == (first_int * calculated_height) and not room_detected:
                         packet.reset()
                         detect_room_dimensions(message)
                     
@@ -236,18 +236,19 @@ def detect_room_dimensions(message):
         
         print(f" [DEBUG] Dimensões calculadas - Width: {hm_width}, Height: {hm_height}")
         
-        # Verificar se as dimensões são válidas (quartos do Habbo geralmente são entre 5x5 e 50x50)
-        if 5 <= hm_width <= 50 and 5 <= hm_height <= 50:
+        # Verificar se as dimensões são válidas (quartos do Habbo podem ser de 5x5 até 200x200)
+        if 5 <= hm_width <= 200 and 5 <= hm_height <= 200 and hm_width * hm_height == tile_count:
             room_width = hm_width
             room_height = hm_height
             room_detected = True
             print(f" [SUCCESS] Dimensões do quarto DEFINIDAS: {room_width}x{room_height}")
             print(f" [SUCCESS] Room detected: {room_detected}")
         else:
-            print(f" [ERROR] Dimensões fora do esperado: {hm_width}x{hm_height}")
-            # Usar dimensões padrão como fallback
-            room_width = 20
-            room_height = 20
+            print(f" [ERROR] Dimensões inválidas: Width={hm_width}, Height={hm_height}, TileCount={tile_count}")
+            print(f" [ERROR] Validação: Width*Height={hm_width * hm_height}, TileCount={tile_count}")
+            # Usar dimensões padrão como fallback apenas se realmente inválidas
+            room_width = 30
+            room_height = 30
             room_detected = True
             print(f" [FALLBACK] Usando dimensões padrão: {room_width}x{room_height}")
         
@@ -259,8 +260,8 @@ def detect_room_dimensions(message):
         traceback.print_exc()
         
         # Fallback final - usar dimensões padrão
-        room_width = 20
-        room_height = 20
+        room_width = 30
+        room_height = 30
         room_detected = True
         print(f" [EMERGENCY FALLBACK] Usando dimensões de emergência: {room_width}x{room_height}")
 
