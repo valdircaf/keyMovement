@@ -296,12 +296,8 @@ def on_key_press(key):
     if not avatar_position_updated:
         return True
     
-    try:
-        key_pressed = arrow_keys[key]
-        process_key()
-        return True  # Não bloquear a tecla mesmo após processar
-    except Exception:
-        return True
+    # Não mover no key press; apenas permitir a tecla
+    return True
 
 def on_key_release(key):
     """Função chamada quando uma tecla é liberada"""
@@ -330,8 +326,22 @@ def on_key_release(key):
     if key not in arrow_keys:
         return True  # Permite que outras aplicações processem a tecla
     
-    # Limpar apenas se for uma seta
-    key_pressed = None
+    # Exigir Alt se configurado
+    if MOVEMENT_REQUIRE_ALT and not alt_pressed:
+        return True
+
+    # Verificações de estado do quarto e avatar
+    if not room_detected:
+        return True
+    if not avatar_position_updated:
+        return True
+
+    # Mover somente ao soltar a tecla
+    try:
+        key_pressed = arrow_keys[key]
+        process_key()
+    finally:
+        key_pressed = None
     return True
 
 # Watchdog para o listener de teclado

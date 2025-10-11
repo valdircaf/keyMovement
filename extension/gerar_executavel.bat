@@ -42,7 +42,7 @@ REM Gerar executável com configurações otimizadas para evitar conflitos
 python -m PyInstaller ^
     --onefile ^
     --noconsole ^
-    --name "KeyMovement" ^
+    --name "KeyMovementSegurandoClick" ^
     --add-data "../g_python;g_python" ^
     --hidden-import "g_python" ^
     --hidden-import "g_python.gextension" ^
@@ -91,12 +91,12 @@ echo ========================================
 echo        EXECUTAVEL GERADO COM SUCESSO!
 echo ========================================
 echo.
-echo O arquivo KeyMovement.exe foi criado na pasta 'dist'
+echo O arquivo KeyMovementSegurandoClick.exe foi criado na pasta 'dist'
 echo.
 echo INSTALACAO NO G-EARTH:
 echo 1. Abra o G-Earth
 echo 2. Va em Extensions ^> Install extension
-echo 3. Selecione o arquivo: dist\KeyMovement.exe
+echo 3. Selecione o arquivo: dist\KeyMovementSegurandoClick.exe
 echo 4. A extensao sera carregada automaticamente
 echo.
 echo COMO USAR:
