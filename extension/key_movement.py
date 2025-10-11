@@ -11,7 +11,7 @@ RUNNING_AS_EXE = getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
 # Import classes individually to avoid circular import issues
 try:
-    from g_python.hparsers import HHeightMap, HUserUpdate
+    from g_python.hparsers import HHeightMap, HUserUpdate, HEntity, HEntityType
 except ImportError:
     # Fallback: define minimal classes if import fails
     class HHeightMap:
@@ -36,6 +36,16 @@ except ImportError:
     class HUserUpdate:
         def __init__(self, packet):
             pass
+    class HEntityType:
+        HABBO = 1
+    class HEntity:
+        def __init__(self, packet):
+            self.name = ""
+            self.entity_type = HEntityType.HABBO
+            self.tile = type("Tile", (), {"x": 0, "y": 0})()
+        @classmethod
+        def parse(cls, packet):
+            return [HEntity(packet)]
 
 # Configuração de ambiente e disponibilidade de pynput
 if RUNNING_AS_EXE:
@@ -87,111 +97,66 @@ last_move_time = 0
 extension_active = True  # Extensão inicia ativa por padrão
 
 # Configuração de múltiplos cliques
-MULTIPLE_CLICKS_COUNT = 5  # Número de cliques a serem enviados (configurável)
+MULTIPLE_CLICKS_COUNT = 1  # Desativar múltiplos envios para evitar anti-flood
 CLICK_DELAY = 0.03  # Delay entre cliques em segundos (30ms)
+MOVE_THROTTLE_MS = 300  # Limite mínimo entre movimentos para evitar flood
 
 room_width = 0  # Será detectado automaticamente
 room_height = 0  # Será detectado automaticamente
 room_detected = False
 
 def initial_position(message):
-    """Captura a posição inicial do avatar quando entra no quarto"""
-    global current_x, current_y, avatar_position_updated, room_width, room_height
-    
-    print(f" [INTERCEPTED] Users packet interceptado!")
-    
+    """Captura a posição inicial do avatar quando entra no quarto (via Users)."""
+    global current_x, current_y, avatar_position_updated
+
     try:
-        # Users packet contém informações de todos os usuários no quarto
-        packet = message.packet
-        packet_copy = packet.copy()
-        
-        # Ler número de usuários
-        user_count = packet_copy.read_int()
-        print(f" [INFO] {user_count} usuários detectados no quarto")
-        
-        # O primeiro usuário geralmente é o nosso avatar
-        if user_count > 0:
-            try:
-                # Ler dados do primeiro usuário (nosso avatar)
-                user_id = packet_copy.read_int()
-                username = packet_copy.read_string()
-                motto = packet_copy.read_string()
-                figure = packet_copy.read_string()
-                x = packet_copy.read_int()
-                y = packet_copy.read_int()
-                z = packet_copy.read_string()
-                
-                print(f" [POSITION_DETECTED] Avatar '{username}' posição inicial: ({x}, {y}, {z})")
-                
-                # Atualizar posição global
-                current_x = x
-                current_y = y
-                avatar_position_updated = True
-                
-                print(f" [SUCCESS] Posição inicial capturada: ({x}, {y})")
-                
-            except Exception as e:
-                print(f" [DEBUG] Erro ao ler dados do usuário: {e}")
-                # Fallback: aguardar UserUpdate
-                current_x = None
-                current_y = None
-                avatar_position_updated = False
-                print(f" [INFO] Aguardando UserUpdate para capturar posição...")
-        
+        entities = HEntity.parse(message.packet)
+        # Log reduzido: não imprimir quantidade de entidades
+
+        # Seleciona o primeiro HABBO como posição inicial (fallback razoável)
+        selected = None
+        for ent in entities:
+            if getattr(ent, "entity_type", None) == HEntityType.HABBO:
+                selected = ent
+                break
+
+        if selected is not None and hasattr(selected, "tile"):
+            current_x = selected.tile.x
+            current_y = selected.tile.y
+            avatar_position_updated = True
+            # print(f" [SUCCESS] Posição inicial capturada: ({current_x}, {current_y})")
+        else:
+            # print(" [INFO] Nenhum HABBO encontrado no Users; aguardando UserUpdate")
+            avatar_position_updated = False
+
     except Exception as e:
-        print(f"✗ [ERROR] Erro ao processar Users packet: {e}")
-        # Reset das variáveis para forçar nova captura
-        current_x = None
-        current_y = None
+        # print(f"✗ [ERROR] Erro ao processar Users: {e}")
         avatar_position_updated = False
-        import traceback
-        traceback.print_exc()
 
 def capture_move_position(message):
-    """Captura TODOS os movimentos enviados ao servidor e atualiza posição atual"""
+    """Captura TODOS os movimentos enviados ao servidor e atualiza posição atual (não bloqueia)."""
     global current_x, current_y, avatar_position_updated, room_width, room_height
-    
-    print(f" [INTERCEPTED] MoveAvatar TO_SERVER interceptado!")
-    
+
     try:
-        # Debug completo do packet
         packet = message.packet
-        print(f" [DEBUG] Packet completo: {packet}")
-        print(f" [DEBUG] Packet length: {len(packet.bytearray)}")
-        print(f" [DEBUG] Packet bytes: {[hex(b) for b in packet.bytearray[:20]]}")
-        
-        # IMPORTANTE: Fazer uma cópia do packet para não interferir no fluxo original
-        packet_bytes = message.packet.bytearray
-        
-        # Ler diretamente do bytearray
-        # Bytes 6-9: x coordinate (big endian)
-        x = int.from_bytes(packet_bytes[6:10], byteorder='big', signed=True)
-        # Bytes 10-13: y coordinate (big endian)  
-        y = int.from_bytes(packet_bytes[10:14], byteorder='big', signed=True)
-        
-        print(f" [DEBUG] MoveAvatar enviado - x: {x}, y: {y}")
-        
-        # SEMPRE atualizar a posição atual quando um movimento é enviado ao servidor
-        # Isso garante que tanto clicks do mouse quanto movimentos por setas atualizem a posição
+        packet.reset()
+        (x, y) = packet.read('ii')
+
         current_x = x
         current_y = y
         avatar_position_updated = True
-        
-        # Validar se está dentro dos limites do quarto (apenas para log)
-        if room_width > 0 and room_height > 0:
-            if 0 <= x < room_width and 0 <= y < room_height:
-                print(f" [SUCCESS] Posição atualizada para: ({x}, {y}) - dentro dos limites")
-            else:
-                print(f" [WARNING] Posição atualizada para: ({x}, {y}) - fora dos limites do quarto {room_width}x{room_height}")
-        else:
-            print(f" [SUCCESS] Posição atualizada para: ({x}, {y}) - aguardando dimensões do quarto")
-            
-        # NÃO BLOQUEAR: Deixar o packet original continuar seu fluxo normal
-        
+        # Logs mínimos para não afetar desempenho
+        # if room_width > 0 and room_height > 0:
+        #     if 0 <= x < room_width and 0 <= y < room_height:
+        #         print(f" [POS] Atualizado: ({x}, {y})")
+        #     else:
+        #         print(f" [POS] Atualizado: ({x}, {y}) fora dos limites {room_width}x{room_height}")
+        # else:
+        #     print(f" [POS] Atualizado: ({x}, {y}) (dimensões ainda não detectadas)")
+
     except Exception as e:
-        print(f"✗ [ERROR] Erro ao capturar movimento: {e}")
-        import traceback
-        traceback.print_exc()
+        # print(f"✗ [ERROR] Erro ao capturar MoveAvatar: {e}")
+        pass
 
 def intercept_all_packets(message):
     """Intercepta TODOS os packets para debug"""
@@ -255,134 +220,29 @@ def intercept_all_packets(message):
 
 def detect_room_dimensions(message):
     global room_width, room_height, room_detected
-    
-    print(f" [INTERCEPTED] HeightMap packet interceptado!")
-    
     try:
-        # IMPORTANTE: Usar o packet original diretamente
-        packet = message.packet
-        
-        print(f" [DEBUG] HeightMap recebido - analisando packet...")
-        print(f" [DEBUG] Packet header ID: {packet.header_id()}")
-        print(f" [DEBUG] Packet length: {len(packet.bytearray)}")
-        
-        # Debug: Mostrar os primeiros bytes do packet
-        raw_bytes = packet.bytearray[:20]  # Primeiros 20 bytes
-        print(f" [DEBUG] Primeiros bytes: {[hex(b) for b in raw_bytes]}")
-        
-        # Analisando os bytes manualmente
-        # Bytes 6-9: width (big-endian)
-        # Bytes 10-13: tile count (big-endian)
-        
-        # Extrair width dos bytes 6-9
-        width_bytes = packet.bytearray[6:10]
-        hm_width = int.from_bytes(width_bytes, byteorder='big')
-        
-        # Extrair tile count dos bytes 10-14
-        tile_count_bytes = packet.bytearray[10:14]
-        tile_count = int.from_bytes(tile_count_bytes, byteorder='big')
-        
-        print(f" [DEBUG] Width bytes: {[hex(b) for b in width_bytes]} = {hm_width}")
-        print(f" [DEBUG] Tile count bytes: {[hex(b) for b in tile_count_bytes]} = {tile_count}")
-        
-        # Calcular height
-        if hm_width > 0 and tile_count > 0:
-            hm_height = int(tile_count / hm_width)
-        else:
-            hm_height = 0
-        
-        print(f" [DEBUG] Dimensões calculadas - Width: {hm_width}, Height: {hm_height}")
-        
-        # Verificar se as dimensões são válidas (quartos do Habbo podem ser de 5x5 até 200x200)
-        if 5 <= hm_width <= 200 and 5 <= hm_height <= 200 and hm_width * hm_height == tile_count:
-            room_width = hm_width
-            room_height = hm_height
+        hm = HHeightMap(message.packet)
+        if hm.width > 0 and hm.height > 0:
+            room_width = hm.width
+            room_height = hm.height
             room_detected = True
-            print(f" [SUCCESS] Dimensões do quarto DEFINIDAS: {room_width}x{room_height}")
-            print(f" [SUCCESS] Room detected: {room_detected}")
-        else:
-            print(f" [ERROR] Dimensões inválidas: Width={hm_width}, Height={hm_height}, TileCount={tile_count}")
-            print(f" [ERROR] Validação: Width*Height={hm_width * hm_height}, TileCount={tile_count}")
-            # Usar dimensões padrão como fallback apenas se realmente inválidas
-            room_width = 30
-            room_height = 30
-            room_detected = True
-            print(f" [FALLBACK] Usando dimensões padrão: {room_width}x{room_height}")
-        
-        # NÃO BLOQUEAR: Deixar o packet original continuar seu fluxo normal
-        
-    except Exception as e:
-        print(f"✗ [ERROR] Erro ao detectar dimensões: {e}")
-        import traceback
-        traceback.print_exc()
-        
-        # Fallback final - usar dimensões padrão
-        room_width = 30
-        room_height = 30
-        room_detected = True
-        print(f" [EMERGENCY FALLBACK] Usando dimensões de emergência: {room_width}x{room_height}")
+            # print(f" [SUCCESS] Dimensões do quarto: {room_width}x{room_height}")
+    except Exception:
+        pass
 
 def detect_floor_dimensions(message):
     global room_width, room_height, room_detected
-    
-    print(f" [INTERCEPTED] FloorHeightMap packet interceptado!")
-    
     try:
-        # IMPORTANTE: Usar o packet original diretamente
-        packet = message.packet
-        
-        print(f" [DEBUG] FloorHeightMap recebido - analisando packet...")
-        print(f" [DEBUG] Packet header ID: {packet.header_id()}")
-        print(f" [DEBUG] Packet length: {len(packet.bytearray)}")
-        
-        # Debug: Mostrar os primeiros bytes do packet
-        raw_bytes = packet.bytearray[:20]  # Primeiros 20 bytes
-        print(f" [DEBUG] Primeiros bytes: {[hex(b) for b in raw_bytes]}")
-        
-        # Analisando os bytes manualmente
-        # Bytes 6-9: width (big-endian)
-        # Bytes 10-13: height (big-endian)
-        
-        # Extrair width dos bytes 6-9
-        width_bytes = packet.bytearray[6:10]
-        fhm_width = int.from_bytes(width_bytes, byteorder='big')
-        
-        # Extrair height dos bytes 10-13
-        height_bytes = packet.bytearray[10:14]
-        fhm_height = int.from_bytes(height_bytes, byteorder='big')
-        
-        print(f" [DEBUG] Width bytes: {[hex(b) for b in width_bytes]} = {fhm_width}")
-        print(f" [DEBUG] Height bytes: {[hex(b) for b in height_bytes]} = {fhm_height}")
-        
-        print(f" [DEBUG] Dimensões calculadas - Width: {fhm_width}, Height: {fhm_height}")
-        
-        # Verificar se as dimensões são válidas (quartos do Habbo podem ser de 5x5 até 200x200)
-        if 5 <= fhm_width <= 200 and 5 <= fhm_height <= 200:
-            room_width = fhm_width
-            room_height = fhm_height
+        p = message.packet
+        p.reset()
+        w, h = p.read('ii')
+        if 5 <= w <= 200 and 5 <= h <= 200:
+            room_width = w
+            room_height = h
             room_detected = True
-            print(f" [SUCCESS] Dimensões do quarto DEFINIDAS via FloorHeightMap: {room_width}x{room_height}")
-            print(f" [SUCCESS] Room detected: {room_detected}")
-        else:
-            print(f" [ERROR] Dimensões inválidas via FloorHeightMap: Width={fhm_width}, Height={fhm_height}")
-            # Usar dimensões padrão como fallback apenas se realmente inválidas
-            room_width = 30
-            room_height = 30
-            room_detected = True
-            print(f" [FALLBACK] Usando dimensões padrão: {room_width}x{room_height}")
-        
-        # NÃO BLOQUEAR: Deixar o packet original continuar seu fluxo normal
-        
-    except Exception as e:
-        print(f"✗ [ERROR] Erro ao detectar dimensões via FloorHeightMap: {e}")
-        import traceback
-        traceback.print_exc()
-        
-        # Fallback final - usar dimensões padrão
-        room_width = 30
-        room_height = 30
-        room_detected = True
-        print(f" [EMERGENCY FALLBACK] Usando dimensões de emergência: {room_width}x{room_height}")
+            # print(f" [SUCCESS] FloorHeightMap: {room_width}x{room_height}")
+    except Exception:
+        pass
 
 
 def on_click(x, y, button, pressed):
@@ -412,22 +272,17 @@ def on_key_press(key):
     if key not in arrow_keys:
         return True  # Retorna True para permitir que outras aplicações recebam a tecla
     
-    # Verificações de estado do quarto e avatar
+    # Verificações de estado do quarto e avatar (sem logs para fluidez)
     if not room_detected:
-        print(" [WARNING] Quarto ainda não detectado - aguardando HeightMap...")
         return True
-    
     if not avatar_position_updated:
-        print(" [WARNING] Posição do avatar ainda não capturada - aguardando movimento...")
         return True
     
     try:
         key_pressed = arrow_keys[key]
-        print(f" [DEBUG] Seta detectada: {key_pressed}")
         process_key()
         return True  # Não bloquear a tecla mesmo após processar
-    except Exception as e:
-        print(f"✗ [ERROR] Erro ao processar tecla: {e}")
+    except Exception:
         return True
 
 def on_key_release(key):
@@ -454,23 +309,49 @@ def on_key_release(key):
     key_pressed = None
     return True
 
+# Watchdog para o listener de teclado
+keyboard_listener = None
+
+def _start_keyboard_listener():
+    global keyboard_listener
+    try:
+        keyboard_listener = keyboard.Listener(
+            on_press=on_key_press,
+            on_release=on_key_release,
+            suppress=False,
+            daemon=True
+        )
+        keyboard_listener.start()
+    except Exception:
+        keyboard_listener = None
+
+def _keyboard_watchdog():
+    global keyboard_listener
+    while True:
+        try:
+            if keyboard_listener is None or not keyboard_listener.is_alive():
+                _start_keyboard_listener()
+            time.sleep(1)
+        except Exception:
+            time.sleep(2)
+
 def process_key():
-    global current_x, current_y, key_pressed, room_width, room_height
+    global current_x, current_y, key_pressed, room_width, room_height, last_move_time
     
     # Verificar se a extensão está ativa
     if not extension_active:
-        print(" [DEBUG] Extensão PARADA - Ignorando tecla pressionada")
+        # print(" [DEBUG] Extensão PARADA - Ignorando tecla pressionada")
         return
-    
-    print(f" [DEBUG] process_key chamado - key_pressed: {key_pressed}")
-    print(f" [DEBUG] Posição atual: current_x={current_x}, current_y={current_y}")
-    print(f" [DEBUG] Dimensões do quarto: {room_width}x{room_height}")
+    # Logs reduzidos
     
     if key_pressed and current_x is not None and current_y is not None:
+        # Limite de taxa: evitar enviar movimentos em sequência muito rápida
+        now = time.time() * 1000
+        if (now - last_move_time) < MOVE_THROTTLE_MS:
+            # print(f" [THROTTLE] Movimento ignorado: aguardando {MOVE_THROTTLE_MS}ms entre comandos")
+            return
         
-        print(f" [DEBUG] Processando tecla: {key_pressed}")
-        print(f" [DEBUG] Posição atual: ({current_x}, {current_y})")
-        print(f" [DEBUG] Dimensões do quarto: {room_width}x{room_height}")
+        # Debug mínimo
         
         # Mapear apenas as setas do teclado
         direction_map = {
@@ -485,28 +366,31 @@ def process_key():
             new_x = current_x + dx
             new_y = current_y + dy
             
-            print(f" [DEBUG] Nova posição calculada: ({new_x}, {new_y})")
+            # print(f" [DEBUG] Nova posição calculada: ({new_x}, {new_y})")
             
             if validate_position(new_x, new_y):
-                print(f" [DEBUG] Movimento válido para ({new_x}, {new_y})")
+                # print(f" [DEBUG] Movimento válido para ({new_x}, {new_y})")
                 current_x = new_x
                 current_y = new_y
-                # Usar múltiplos cliques para reforçar o movimento com setas
-                move_avatar(current_x, current_y, multiple_clicks=True)
+                # Enviar apenas um pacote para evitar anti-flood
+                last_move_time = now
+                move_avatar(current_x, current_y, multiple_clicks=False)
             else:
-                print(f"✗ [DEBUG] Movimento bloqueado: posição ({new_x}, {new_y}) fora dos limites do quarto {room_width}x{room_height}")
+                # print(f"✗ [DEBUG] Movimento bloqueado: posição ({new_x}, {new_y}) fora dos limites do quarto {room_width}x{room_height}")
+                pass
         else:
             print(f" [DEBUG] Tecla {key_pressed} não é uma seta válida")
     elif key_pressed:
-        print(f"⚠ [DEBUG] Posição atual não definida, forçando atualização")
+        # print(f"⚠ [DEBUG] Posição atual não definida, forçando atualização")
         # Se não temos posição atual, forçar atualização
         if not room_detected:
-            print("⚠ [DEBUG] Aguarde a detecção das dimensões do quarto antes de usar as setas.")
+            pass
         else:
-            print("⚠ [DEBUG] Clique no quarto primeiro para definir a posição inicial.")
+            # print("⚠ [DEBUG] Clique no quarto primeiro para definir a posição inicial.")
             force_position_update()
     else:
-        print(" [DEBUG] Nenhuma tecla pressionada ou process_key chamado sem key_pressed")
+        # print(" [DEBUG] Nenhuma tecla pressionada ou process_key chamado sem key_pressed")
+        pass
 
 def move_avatar(x, y, multiple_clicks=True):
     """Envia comando de movimento para o servidor"""
@@ -619,30 +503,12 @@ ext.intercept(Direction.TO_CLIENT, initial_position, "Users", mode='async')
 ext.intercept(Direction.TO_CLIENT, reset_position_on_room_change, "GetGuestRoom", mode='async')  # Reset ao mudar de quarto
 ext.intercept(Direction.TO_CLIENT, detect_room_dimensions, "HeightMap", mode='async')
 ext.intercept(Direction.TO_CLIENT, detect_floor_dimensions, "FloorHeightMap", mode='async')
-ext.intercept(Direction.TO_SERVER, capture_move_position, "MoveAvatar", mode='async')  # Capturar apenas movimentos do próprio usuário
+ext.intercept(Direction.TO_SERVER, capture_move_position, "MoveAvatar", mode='async')
 
 # Inicializar listeners de teclado se pynput estiver disponível
 if PYNPUT_AVAILABLE:
-    print(" [INIT] Iniciando listeners de teclado...")
-    try:
-        keyboard_listener = keyboard.Listener(
-            on_press=on_key_press,
-            on_release=on_key_release,
-            suppress=False,  # Não suprimir teclas
-            daemon=True      # Não bloquear a execução
-        )
-        keyboard_listener.start()
-        if RUNNING_AS_EXE:
-            print(" [INIT] Keyboard listener iniciado (modo executável, não-bloqueante)")
-        else:
-            print(" [INIT] Keyboard listener iniciado (modo local, não-bloqueante)")
-        
-        # Mouse listener permanece desabilitado para evitar conflitos
-        print(" [INFO] Use as SETAS do teclado para mover o avatar")
-        print(" [INFO] Extensão em modo PLAY responde às setas; outras teclas passam normalmente")
-    except Exception as e:
-        print(f" [ERROR] Erro ao inicializar listener de teclado: {e}")
-        print(" [ERROR] A extensão pode não funcionar corretamente")
+    _start_keyboard_listener()
+    threading.Thread(target=_keyboard_watchdog, daemon=True).start()
 else:
     print(" [ERROR] PYNPUT não disponível - listeners não iniciados")
     print(" [ERROR] Instale o pynput: pip install pynput")
