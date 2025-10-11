@@ -6,9 +6,8 @@ echo.
 
 REM Verificar se Python está instalado
 python --version >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Python nao encontrado no PATH
-    echo Por favor, instale o Python e adicione ao PATH
+if %errorlevel% neq 0 (
+    echo [ERRO] Python nao encontrado! Instale o Python primeiro.
     pause
     exit /b 1
 )
@@ -16,60 +15,96 @@ if errorlevel 1 (
 echo [INFO] Python encontrado!
 
 REM Verificar se PyInstaller está instalado
-python -c "import PyInstaller" >nul 2>&1
-if errorlevel 1 (
+python -m PyInstaller --version >nul 2>&1
+if %errorlevel% neq 0 (
     echo [INFO] PyInstaller nao encontrado. Instalando...
     python -m pip install pyinstaller
-    if errorlevel 1 (
-        echo [ERROR] Falha ao instalar PyInstaller
+    if %errorlevel% neq 0 (
+        echo [ERRO] Falha ao instalar PyInstaller!
         pause
         exit /b 1
     )
+    echo [INFO] PyInstaller instalado com sucesso!
+) else (
+    echo [INFO] PyInstaller ja esta instalado!
 )
 
-echo [INFO] PyInstaller disponivel!
-
-REM Limpar builds anteriores
+echo.
+echo [INFO] Limpando builds anteriores...
 if exist "dist" rmdir /s /q "dist"
 if exist "build" rmdir /s /q "build"
-if exist "*.spec" del "*.spec"
+if exist "*.spec" del /q "*.spec"
 
 echo [INFO] Gerando executavel...
+echo.
 
-REM Gerar executável com PyInstaller
+REM Gerar executável com configurações otimizadas para evitar conflitos
 python -m PyInstaller ^
     --onefile ^
     --noconsole ^
     --name "KeyMovement" ^
-    --distpath "." ^
-    --workpath "build" ^
-    --specpath "build" ^
+    --add-data "../g_python;g_python" ^
+    --hidden-import "g_python" ^
+    --hidden-import "g_python.gextension" ^
+    --hidden-import "g_python.hmessage" ^
+    --hidden-import "g_python.hpacket" ^
+    --hidden-import "g_python.hparsers" ^
+    --hidden-import "g_python.hdirection" ^
+    --hidden-import "g_python.htools" ^
+    --hidden-import "g_python.hunityparsers" ^
+    --hidden-import "g_python.hunitytools" ^
+    --hidden-import "pynput" ^
+    --hidden-import "pynput.keyboard" ^
+    --hidden-import "pynput.mouse" ^
+    --hidden-import "socket" ^
+    --hidden-import "threading" ^
+    --hidden-import "time" ^
+    --hidden-import "sys" ^
+    --hidden-import "os" ^
+    --hidden-import "copy" ^
+    --hidden-import "enum" ^
+    --hidden-import "typing" ^
+    --exclude-module "tkinter" ^
+    --exclude-module "matplotlib" ^
+    --exclude-module "numpy" ^
+    --exclude-module "scipy" ^
+    --exclude-module "PIL" ^
+    --exclude-module "cv2" ^
+    --clean ^
     key_movement.py
 
-if errorlevel 1 (
-    echo [ERROR] Falha na compilacao
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERRO] Falha na compilacao!
+    echo Verifique os erros acima e tente novamente.
     pause
     exit /b 1
 )
 
-REM Limpar arquivos temporários
+echo.
+echo [INFO] Limpando arquivos temporarios...
 if exist "build" rmdir /s /q "build"
+if exist "*.spec" del /q "*.spec"
 
 echo.
-echo [SUCCESS] Compilacao concluida!
+echo ========================================
+echo        EXECUTAVEL GERADO COM SUCESSO!
+echo ========================================
 echo.
-echo Arquivo gerado: KeyMovement.exe
+echo O arquivo KeyMovement.exe foi criado na pasta 'dist'
 echo.
-echo INSTRUCOES DE INSTALACAO:
-echo 1. Copie o arquivo KeyMovement.exe para a pasta de extensoes do G-Earth
-echo 2. Abra o G-Earth
-echo 3. Va em Extensoes e clique em "Instalar extensao"
-echo 4. Selecione o arquivo KeyMovement.exe
-echo 5. A extensao sera carregada automaticamente
+echo INSTALACAO NO G-EARTH:
+echo 1. Abra o G-Earth
+echo 2. Va em Extensions ^> Install extension
+echo 3. Selecione o arquivo: dist\KeyMovement.exe
+echo 4. A extensao sera carregada automaticamente
 echo.
 echo COMO USAR:
-echo - Use as setas do teclado ou WASD para mover o avatar
-echo - Clique no quarto para definir posicao inicial
-echo - A extensao detecta automaticamente as dimensoes do quarto
+echo 1. Entre em um quarto no Habbo
+echo 2. A extensao detectara automaticamente as dimensoes
+echo 3. Use as SETAS do teclado para mover o avatar
+echo 4. A extensao nao interfere com outras teclas
+echo 5. Outras aplicacoes funcionam normalmente
 echo.
-pause
+echo Pressione qualquer tecla para sair...
+pause >nul
