@@ -96,6 +96,8 @@ last_move_time = 0
 # Controle de estado da extensão (play/stop)
 extension_active = True  # Extensão inicia ativa por padrão
 
+#Alterando
+
 # Configuração de múltiplos cliques
 MULTIPLE_CLICKS_COUNT = 1  # Desativar múltiplos envios para evitar anti-flood
 CLICK_DELAY = 0.03  # Delay entre cliques em segundos (30ms)
