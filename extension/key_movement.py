@@ -101,6 +101,10 @@ MULTIPLE_CLICKS_COUNT = 1  # Desativar múltiplos envios para evitar anti-flood
 CLICK_DELAY = 0.03  # Delay entre cliques em segundos (30ms)
 MOVE_THROTTLE_MS = 300  # Limite mínimo entre movimentos para evitar flood
 
+# Modificador para evitar capturar todas as teclas: exigir Alt pressionado
+MOVEMENT_REQUIRE_ALT = False
+alt_pressed = False
+
 room_width = 0  # Será detectado automaticamente
 room_height = 0  # Será detectado automaticamente
 room_detected = False
@@ -254,12 +258,19 @@ def on_click(x, y, button, pressed):
 
 def on_key_press(key):
     """Função chamada quando uma tecla é pressionada - APENAS SETAS e quando ATIVA"""
-    global current_x, current_y, room_width, room_height, room_detected, avatar_position_updated, key_pressed, extension_active
-    
+    global current_x, current_y, room_width, room_height, room_detected, avatar_position_updated, key_pressed, extension_active, alt_pressed
+
     # Verificar se a extensão está ativa (botão play pressionado)
     if not extension_active:
         return True  # Retorna True para não bloquear a tecla
-    
+
+    # Atualizar estado de modificadores
+    try:
+        if key in (keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r):
+            alt_pressed = True
+    except Exception:
+        pass
+
     # Mapear APENAS as setas do teclado
     arrow_keys = {
         keyboard.Key.up: 'up',
@@ -271,6 +282,10 @@ def on_key_press(key):
     # Se não é uma seta, ignorar completamente e não bloquear
     if key not in arrow_keys:
         return True  # Retorna True para permitir que outras aplicações recebam a tecla
+
+    # Exigir Alt para processar movimento, para evitar travar digitação
+    if MOVEMENT_REQUIRE_ALT and not alt_pressed:
+        return True
     
     # Verificações de estado do quarto e avatar (sem logs para fluidez)
     if not room_detected:
@@ -287,12 +302,19 @@ def on_key_press(key):
 
 def on_key_release(key):
     """Função chamada quando uma tecla é liberada"""
-    global key_pressed
+    global key_pressed, alt_pressed
     
     # Verificar se a extensão está ativa
     if not extension_active:
         return True  # Não processar se extensão estiver parada
     
+    # Atualizar estado de modificadores
+    try:
+        if key in (keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r):
+            alt_pressed = False
+    except Exception:
+        pass
+
     # Mapear APENAS as setas do teclado
     arrow_keys = {
         keyboard.Key.up: 'up',
@@ -422,9 +444,8 @@ def move_avatar(x, y, multiple_clicks=True):
                         duplicate_packet.append_int(x)
                         duplicate_packet.append_int(y)
                         ext.send_to_server(duplicate_packet)
-                        print(f" [MULTI] Movimento adicional {i+1}/{MULTIPLE_CLICKS_COUNT} enviado")
                     except Exception as e:
-                        print(f"✗ [ERROR] Erro no movimento múltiplo {i+1}: {e}")
+                        pass
                         break
             
             # Executar múltiplos cliques em thread separada
@@ -445,9 +466,11 @@ def validate_position(x, y):
 def force_position_update():
     """Força uma atualização da posição do avatar"""
     global current_x, current_y, avatar_position_updated
-    print(f" [FORCE_UPDATE] Forçando atualização da posição do avatar")
-    # Solicita informações do usuário atual
-    ext.send_to_server("InfoRetrieve", 0)  # Solicita informações do avatar
+    # Solicita informações do usuário atual sem logar no console
+    try:
+        ext.send_to_server(HPacket("InfoRetrieve", 0))
+    except Exception:
+        pass
     avatar_position_updated = False  # Marca que precisa de atualização
 
 def reset_position_on_room_change(message):
