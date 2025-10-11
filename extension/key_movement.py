@@ -36,17 +36,17 @@ except ImportError:
 try:
     from pynput import keyboard, mouse
     PYNPUT_AVAILABLE = True
-    print("✅ [INIT] pynput importado com sucesso")
+    print(" [INIT] pynput importado com sucesso")
 except ImportError:
     PYNPUT_AVAILABLE = False
-    print("❌ [ERROR] pynput não encontrado - instale com: pip install pynput")
+    print(" [ERROR] pynput não encontrado - instale com: pip install pynput")
     # print("AVISO: pynput não está instalado. Execute 'pip install pynput' para usar esta extensão.")
 
 extension_info = {
-    "title": "KeyMovement - Debug",
-    "description": "Movimento com setas - Versão com logs para debug",
-    "version": "1.5-debug",
-    "author": "G-Python"
+    "title": "KeyMovement",
+    "description": "Movimento livre com setas",
+    "version": "1.0.0",
+    "author": "Valdir"
 }
 
 ext = Extension(extension_info, sys.argv)
@@ -57,6 +57,9 @@ current_y = None
 avatar_position_updated = False
 key_pressed = None
 last_move_time = 0
+
+# Controle de estado da extensão (play/stop)
+extension_active = True  # Extensão inicia ativa por padrão
 
 # Configuração de múltiplos cliques
 MULTIPLE_CLICKS_COUNT = 5  # Número de cliques a serem enviados (configurável)
@@ -70,12 +73,12 @@ def initial_position(message):
     """Captura a posição inicial do avatar quando entra no quarto"""
     global current_x, current_y, avatar_position_updated, room_width, room_height
     
-    print(f"🏠 [INTERCEPTED] RoomReady packet interceptado!")
+    print(f" [INTERCEPTED] RoomReady packet interceptado!")
     
     try:
         # RoomReady não contém posição diretamente, mas indica que o quarto foi carregado
         # A posição será capturada pelo próximo UserUpdate
-        print(f"🏠 [INFO] Quarto carregado, aguardando UserUpdate para posição inicial...")
+        print(f" [INFO] Quarto carregado, aguardando UserUpdate para posição inicial...")
         
         # Reset das variáveis de posição para forçar nova captura
         current_x = None
@@ -88,17 +91,17 @@ def initial_position(message):
         traceback.print_exc()
 
 def capture_move_position(message):
-    """Captura a posição quando o usuário clica no quarto (MoveAvatar TO_SERVER)"""
+    """Captura TODOS os movimentos enviados ao servidor e atualiza posição atual"""
     global current_x, current_y, avatar_position_updated, room_width, room_height
     
-    print(f"🎯 [INTERCEPTED] MoveAvatar TO_SERVER interceptado!")
+    print(f" [INTERCEPTED] MoveAvatar TO_SERVER interceptado!")
     
     try:
         # Debug completo do packet
         packet = message.packet
-        print(f"🔍 [DEBUG] Packet completo: {packet}")
-        print(f"🔍 [DEBUG] Packet length: {len(packet.bytearray)}")
-        print(f"🔍 [DEBUG] Packet bytes: {[hex(b) for b in packet.bytearray[:20]]}")
+        print(f" [DEBUG] Packet completo: {packet}")
+        print(f" [DEBUG] Packet length: {len(packet.bytearray)}")
+        print(f" [DEBUG] Packet bytes: {[hex(b) for b in packet.bytearray[:20]]}")
         
         # IMPORTANTE: Fazer uma cópia do packet para não interferir no fluxo original
         packet_bytes = message.packet.bytearray
@@ -109,23 +112,22 @@ def capture_move_position(message):
         # Bytes 10-13: y coordinate (big endian)  
         y = int.from_bytes(packet_bytes[10:14], byteorder='big', signed=True)
         
-        print(f"🔍 [DEBUG] MoveAvatar enviado - x: {x}, y: {y}")
+        print(f" [DEBUG] MoveAvatar enviado - x: {x}, y: {y}")
         
-        # Validar coordenadas antes de atualizar
+        # SEMPRE atualizar a posição atual quando um movimento é enviado ao servidor
+        # Isso garante que tanto clicks do mouse quanto movimentos por setas atualizem a posição
+        current_x = x
+        current_y = y
+        avatar_position_updated = True
+        
+        # Validar se está dentro dos limites do quarto (apenas para log)
         if room_width > 0 and room_height > 0:
             if 0 <= x < room_width and 0 <= y < room_height:
-                current_x = x
-                current_y = y
-                avatar_position_updated = True
-                print(f"✅ [SUCCESS] Posição atualizada para: ({x}, {y})")
+                print(f" [SUCCESS] Posição atualizada para: ({x}, {y}) - dentro dos limites")
             else:
-                print(f"⚠️ [WARNING] Movimento para ({x}, {y}) fora dos limites do quarto {room_width}x{room_height}")
+                print(f" [WARNING] Posição atualizada para: ({x}, {y}) - fora dos limites do quarto {room_width}x{room_height}")
         else:
-            # Se ainda não temos dimensões, armazenar temporariamente
-            current_x = x
-            current_y = y
-            avatar_position_updated = True
-            print(f"✅ [SUCCESS] Posição capturada: ({x}, {y}) - aguardando dimensões do quarto")
+            print(f" [SUCCESS] Posição atualizada para: ({x}, {y}) - aguardando dimensões do quarto")
             
         # NÃO BLOQUEAR: Deixar o packet original continuar seu fluxo normal
         
@@ -143,7 +145,7 @@ def intercept_all_packets(message):
         
         # Log packets com tamanho significativo que podem ser HeightMap
         if packet_length > 20:  # HeightMap geralmente tem dados substanciais
-            print(f"🔍 [ALL_PACKETS] Header ID: {header_id}, Length: {packet_length}")
+            print(f" [ALL_PACKETS] Header ID: {header_id}, Length: {packet_length}")
             
             # Analisar TODOS os packets grandes para encontrar o correto
             packet.reset()
@@ -155,23 +157,23 @@ def intercept_all_packets(message):
                 # Verificar se pode ser width, height (ao invés de width, tileCount)
                 if first_int > 10 and first_int < 200 and second_int > 10 and second_int < 200:
                     # Pode ser width, height diretamente
-                    print(f"🎯 [POSSIBLE_ROOM_DIMENSIONS] Header {header_id}: Possível Width={first_int}, Height={second_int}")
+                    print(f" [POSSIBLE_ROOM_DIMENSIONS] Header {header_id}: Possível Width={first_int}, Height={second_int}")
                     
                     # Tentar ler o terceiro valor
                     try:
                         third_int = packet.read_int()
-                        print(f"🔍 [ROOM_DIMENSIONS] Header {header_id}: {first_int}, {second_int}, {third_int}")
+                        print(f" [ROOM_DIMENSIONS] Header {header_id}: {first_int}, {second_int}, {third_int}")
                         
                         # Se o terceiro valor é aproximadamente first*second, então é width, height, tileCount
                         if abs(third_int - (first_int * second_int)) < 10:
-                            print(f"🎯 [FOUND_CORRECT_HEIGHTMAP] Header {header_id}: Width={first_int}, Height={second_int}, TileCount={third_int}")
+                            print(f" [FOUND_CORRECT_HEIGHTMAP] Header {header_id}: Width={first_int}, Height={second_int}, TileCount={third_int}")
                             
                             # Atualizar dimensões globais diretamente
                             global room_width, room_height, room_detected
                             room_width = first_int
                             room_height = second_int
                             room_detected = True
-                            print(f"✅ [SUCCESS] Dimensões CORRETAS definidas: {room_width}x{room_height}")
+                            print(f" [SUCCESS] Dimensões CORRETAS definidas: {room_width}x{room_height}")
                             return
                             
                     except:
@@ -181,7 +183,7 @@ def intercept_all_packets(message):
                 if first_int > 0 and first_int < 200 and second_int > 0:
                     calculated_height = int(second_int / first_int) if first_int > 0 else 0
                     
-                    print(f"🎯 [POSSIBLE_HEIGHTMAP] Header {header_id}: Width={first_int}, TileCount={second_int}, Height={calculated_height}, Length: {packet_length}")
+                    print(f" [POSSIBLE_HEIGHTMAP] Header {header_id}: Width={first_int}, TileCount={second_int}, Height={calculated_height}, Length: {packet_length}")
                     
                     # Se parece ser um HeightMap válido, processar apenas se não temos dimensões melhores
                     if calculated_height > 0 and calculated_height < 200 and not room_detected:
@@ -197,19 +199,19 @@ def intercept_all_packets(message):
 def detect_room_dimensions(message):
     global room_width, room_height, room_detected
     
-    print(f"🎯 [INTERCEPTED] HeightMap packet interceptado!")
+    print(f" [INTERCEPTED] HeightMap packet interceptado!")
     
     try:
         # IMPORTANTE: Usar o packet original diretamente
         packet = message.packet
         
-        print(f"🔍 [DEBUG] HeightMap recebido - analisando packet...")
-        print(f"🔍 [DEBUG] Packet header ID: {packet.header_id()}")
-        print(f"🔍 [DEBUG] Packet length: {len(packet.bytearray)}")
+        print(f" [DEBUG] HeightMap recebido - analisando packet...")
+        print(f" [DEBUG] Packet header ID: {packet.header_id()}")
+        print(f" [DEBUG] Packet length: {len(packet.bytearray)}")
         
         # Debug: Mostrar os primeiros bytes do packet
         raw_bytes = packet.bytearray[:20]  # Primeiros 20 bytes
-        print(f"🔍 [DEBUG] Primeiros bytes: {[hex(b) for b in raw_bytes]}")
+        print(f" [DEBUG] Primeiros bytes: {[hex(b) for b in raw_bytes]}")
         
         # Analisando os bytes manualmente
         # Bytes 6-9: width (big-endian)
@@ -223,8 +225,8 @@ def detect_room_dimensions(message):
         tile_count_bytes = packet.bytearray[10:14]
         tile_count = int.from_bytes(tile_count_bytes, byteorder='big')
         
-        print(f"🔍 [DEBUG] Width bytes: {[hex(b) for b in width_bytes]} = {hm_width}")
-        print(f"🔍 [DEBUG] Tile count bytes: {[hex(b) for b in tile_count_bytes]} = {tile_count}")
+        print(f" [DEBUG] Width bytes: {[hex(b) for b in width_bytes]} = {hm_width}")
+        print(f" [DEBUG] Tile count bytes: {[hex(b) for b in tile_count_bytes]} = {tile_count}")
         
         # Calcular height
         if hm_width > 0 and tile_count > 0:
@@ -232,22 +234,22 @@ def detect_room_dimensions(message):
         else:
             hm_height = 0
         
-        print(f"🔍 [DEBUG] Dimensões calculadas - Width: {hm_width}, Height: {hm_height}")
+        print(f" [DEBUG] Dimensões calculadas - Width: {hm_width}, Height: {hm_height}")
         
         # Verificar se as dimensões são válidas (quartos do Habbo geralmente são entre 5x5 e 50x50)
         if 5 <= hm_width <= 50 and 5 <= hm_height <= 50:
             room_width = hm_width
             room_height = hm_height
             room_detected = True
-            print(f"✅ [SUCCESS] Dimensões do quarto DEFINIDAS: {room_width}x{room_height}")
-            print(f"✅ [SUCCESS] Room detected: {room_detected}")
+            print(f" [SUCCESS] Dimensões do quarto DEFINIDAS: {room_width}x{room_height}")
+            print(f" [SUCCESS] Room detected: {room_detected}")
         else:
-            print(f"❌ [ERROR] Dimensões fora do esperado: {hm_width}x{hm_height}")
+            print(f" [ERROR] Dimensões fora do esperado: {hm_width}x{hm_height}")
             # Usar dimensões padrão como fallback
             room_width = 20
             room_height = 20
             room_detected = True
-            print(f"🔧 [FALLBACK] Usando dimensões padrão: {room_width}x{room_height}")
+            print(f" [FALLBACK] Usando dimensões padrão: {room_width}x{room_height}")
         
         # NÃO BLOQUEAR: Deixar o packet original continuar seu fluxo normal
         
@@ -260,7 +262,7 @@ def detect_room_dimensions(message):
         room_width = 20
         room_height = 20
         room_detected = True
-        print(f"🔧 [EMERGENCY FALLBACK] Usando dimensões de emergência: {room_width}x{room_height}")
+        print(f" [EMERGENCY FALLBACK] Usando dimensões de emergência: {room_width}x{room_height}")
 
 def detect_floor_dimensions(message):
     """Detecta dimensões através do FloorHeightMap como fallback"""
@@ -289,6 +291,7 @@ def detect_floor_dimensions(message):
 
 
 def on_click(x, y, button, pressed):
+    """Função chamada quando o mouse é clicado"""
     global current_x, current_y, avatar_position_updated, room_width, room_height, room_detected
     
     if pressed and button == mouse.Button.left:
@@ -305,67 +308,48 @@ def on_click(x, y, button, pressed):
         if 0 <= room_x < room_width and 0 <= room_y < room_height:
             # print(f"✓ Clique mapeado para coordenada ({room_x}, {room_y}) no quarto {room_width}x{room_height}")
             
-            current_x = room_x
-            current_y = room_y
-            avatar_position_updated = True
+            # NOTA: Não atualizamos current_x e current_y aqui manualmente
+            # A posição será atualizada automaticamente pela função capture_move_position
+            # quando o packet MoveAvatar for enviado ao servidor
             
             # Usar múltiplos cliques para reforçar o movimento
             move_avatar(room_x, room_y, multiple_clicks=True)
 
 def on_key_press(key):
-    """Função chamada quando uma tecla é pressionada"""
-    global current_x, current_y, room_width, room_height, room_detected, avatar_position_updated, key_pressed
+    """Função chamada quando uma tecla é pressionada - APENAS SETAS e quando ATIVA"""
+    global current_x, current_y, room_width, room_height, room_detected, avatar_position_updated, key_pressed, extension_active
     
-    print(f"🎹 [DEBUG] Tecla pressionada: {key}")
-    print(f"🎯 [STATUS] Room detected: {room_detected}, Dimensions: {room_width}x{room_height}")
-    print(f"🎯 [STATUS] Current position: ({current_x}, {current_y})")
-    print(f"🎯 [STATUS] Avatar position updated: {avatar_position_updated}")
+    # Verificar se a extensão está ativa (botão play pressionado)
+    if not extension_active:
+        return  # Não processar teclas se extensão estiver parada
     
+    # Mapear APENAS as setas do teclado
+    arrow_keys = {
+        keyboard.Key.up: 'up',
+        keyboard.Key.down: 'down', 
+        keyboard.Key.left: 'left',
+        keyboard.Key.right: 'right'
+    }
+    
+    # Se não é uma seta, ignorar completamente
+    if key not in arrow_keys:
+        return
+    
+    # Verificações de estado do quarto e avatar
     if not room_detected:
-        print("⚠️ [WARNING] Quarto ainda não detectado - aguardando HeightMap...")
+        print(" [WARNING] Quarto ainda não detectado - aguardando HeightMap...")
         return
     
     if not avatar_position_updated:
-        print("⚠️ [WARNING] Posição do avatar ainda não capturada - aguardando movimento...")
+        print(" [WARNING] Posição do avatar ainda não capturada - aguardando movimento...")
         return
     
     try:
-        # Mapear teclas especiais
-        key_map = {
-            keyboard.Key.up: 'up',
-            keyboard.Key.down: 'down', 
-            keyboard.Key.left: 'left',
-            keyboard.Key.right: 'right'
-        }
-        
-        if key in key_map:
-            key_pressed = key_map[key]
-            print(f"🎯 [DEBUG] Seta detectada: {key_pressed}")
-            
-            # Processar imediatamente
-            process_key()
-        else:
-            print(f"⚠️ [DEBUG] Tecla não mapeada: {key}")
-            
-    except AttributeError as e:
+        key_pressed = arrow_keys[key]
+        print(f" [DEBUG] Seta detectada: {key_pressed}")
+        process_key()
+    except Exception as e:
         print(f"✗ [ERROR] Erro ao processar tecla: {e}")
-        # Tentar mapear teclas alfanuméricas se necessário
-        if hasattr(key, 'char'):
-            char_map = {
-                'w': 'up',
-                's': 'down',
-                'a': 'left', 
-                'd': 'right'
-            }
-            
-            if key.char and key.char.lower() in char_map:
-                key_pressed = char_map[key.char.lower()]
-                print(f"🎯 [DEBUG] Tecla WASD detectada: {key_pressed}")
-                process_key()
-            else:
-                print(f"⚠️ [DEBUG] Tecla char não mapeada: {key.char}")
-        else:
-            print(f"⚠️ [DEBUG] Tecla sem char: {key}")
 
 def on_key_release(key):
     global key_pressed
@@ -375,21 +359,27 @@ def on_key_release(key):
 def process_key():
     global current_x, current_y, key_pressed, room_width, room_height
     
-    print(f"🔍 [DEBUG] process_key chamado - key_pressed: {key_pressed}")
-    print(f"🔍 [DEBUG] Posição atual: current_x={current_x}, current_y={current_y}")
-    print(f"🔍 [DEBUG] Dimensões do quarto: {room_width}x{room_height}")
+    # Verificar se a extensão está ativa
+    if not extension_active:
+        print(" [DEBUG] Extensão PARADA - Ignorando tecla pressionada")
+        return
+    
+    print(f" [DEBUG] process_key chamado - key_pressed: {key_pressed}")
+    print(f" [DEBUG] Posição atual: current_x={current_x}, current_y={current_y}")
+    print(f" [DEBUG] Dimensões do quarto: {room_width}x{room_height}")
     
     if key_pressed and current_x is not None and current_y is not None:
         
-        print(f"🔍 [DEBUG] Processando tecla: {key_pressed}")
-        print(f"🔍 [DEBUG] Posição atual: ({current_x}, {current_y})")
-        print(f"🔍 [DEBUG] Dimensões do quarto: {room_width}x{room_height}")
+        print(f" [DEBUG] Processando tecla: {key_pressed}")
+        print(f" [DEBUG] Posição atual: ({current_x}, {current_y})")
+        print(f" [DEBUG] Dimensões do quarto: {room_width}x{room_height}")
         
+        # Mapear apenas as setas do teclado
         direction_map = {
-            'up': (0, -1),
-            'down': (0, 1),
-            'left': (-1, 0),
-            'right': (1, 0)
+            'up': (0, -1),      # Seta para cima
+            'down': (0, 1),     # Seta para baixo
+            'left': (-1, 0),    # Seta para esquerda
+            'right': (1, 0)     # Seta para direita
         }
         
         if key_pressed in direction_map:
@@ -397,18 +387,18 @@ def process_key():
             new_x = current_x + dx
             new_y = current_y + dy
             
-            print(f"🔍 [DEBUG] Nova posição calculada: ({new_x}, {new_y})")
+            print(f" [DEBUG] Nova posição calculada: ({new_x}, {new_y})")
             
             if 0 <= new_x < room_width and 0 <= new_y < room_height:
-                print(f"✅ [DEBUG] Movimento válido para ({new_x}, {new_y})")
+                print(f" [DEBUG] Movimento válido para ({new_x}, {new_y})")
                 current_x = new_x
                 current_y = new_y
-                # Usar múltiplos cliques para reforçar o movimento com setas também
+                # Usar múltiplos cliques para reforçar o movimento com setas
                 move_avatar(current_x, current_y, multiple_clicks=True)
             else:
                 print(f"✗ [DEBUG] Movimento bloqueado: posição ({new_x}, {new_y}) fora dos limites do quarto {room_width}x{room_height}")
         else:
-            print(f"⚠️ [DEBUG] Tecla {key_pressed} não encontrada no direction_map")
+            print(f" [DEBUG] Tecla {key_pressed} não é uma seta válida")
     elif key_pressed:
         print(f"⚠ [DEBUG] Posição atual não definida. current_x={current_x}, current_y={current_y}")
         # Se não temos posição atual, aguardar detecção
@@ -418,15 +408,14 @@ def process_key():
             print("⚠ [DEBUG] Clique no quarto primeiro para definir a posição inicial.")
             avatar_position_updated = True
     else:
-        print("🔍 [DEBUG] Nenhuma tecla pressionada ou process_key chamado sem key_pressed")
+        print(" [DEBUG] Nenhuma tecla pressionada ou process_key chamado sem key_pressed")
 
 def move_avatar(x, y, multiple_clicks=True):
     """Envia comando de movimento para o servidor"""
-    global current_x, current_y
     import time
     
     try:
-        print(f"🚀 [MOVE] Enviando movimento para ({x}, {y})")
+        print(f" [MOVE] Enviando movimento para ({x}, {y})")
         
         # Criar packet MoveAvatar TO_SERVER: {i:x}{i:y}
         move_packet = HPacket("MoveAvatar")
@@ -436,11 +425,10 @@ def move_avatar(x, y, multiple_clicks=True):
         # Enviar o packet para o servidor
         ext.send_to_server(move_packet)
         
-        # Atualizar posição atual imediatamente
-        current_x = x
-        current_y = y
+        # NOTA: A posição atual será atualizada automaticamente pela função capture_move_position
+        # que intercepta TODOS os packets MoveAvatar TO_SERVER, incluindo os que enviamos aqui
         
-        print(f"✅ [SUCCESS] Movimento enviado e posição atualizada para ({x}, {y})")
+        print(f" [SUCCESS] Movimento enviado para ({x}, {y}) - posição será atualizada automaticamente")
         
         # Se múltiplos cliques estão habilitados, enviar vários packets
         if multiple_clicks and MULTIPLE_CLICKS_COUNT > 1:
@@ -452,7 +440,7 @@ def move_avatar(x, y, multiple_clicks=True):
                         duplicate_packet.append_int(x)
                         duplicate_packet.append_int(y)
                         ext.send_to_server(duplicate_packet)
-                        print(f"🔄 [MULTI] Movimento adicional {i+1}/{MULTIPLE_CLICKS_COUNT} enviado")
+                        print(f" [MULTI] Movimento adicional {i+1}/{MULTIPLE_CLICKS_COUNT} enviado")
                     except Exception as e:
                         print(f"✗ [ERROR] Erro no movimento múltiplo {i+1}: {e}")
                         break
@@ -482,45 +470,54 @@ def reset_position_on_extension_start():
 
 reset_position_on_extension_start()
 
-# print("🚀 [INIT] Configurando interceptações...")
+# Funções de controle da extensão (play/stop)
+def start_extension():
+    """Ativar a extensão (botão play)"""
+    global extension_active
+    extension_active = True
+    print(" [CONTROL] Extensão ATIVADA - Mapeamento de setas habilitado")
 
-# REMOVIDO: Interceptação global que causava bloqueios
-# ext.intercept(Direction.TO_CLIENT, intercept_all_packets)
-# print("✅ [INIT] Interceptação geral REMOVIDA para evitar bloqueios")
+def stop_extension():
+    """Parar a extensão (botão stop/x)"""
+    global extension_active
+    extension_active = False
+    print(" [CONTROL] Extensão PARADA - Mapeamento de setas desabilitado")
 
-# REATIVADO: HeightMap é essencial para detectar dimensões da sala
+def toggle_extension():
+    """Alternar estado da extensão"""
+    global extension_active
+    if extension_active:
+        stop_extension()
+    else:
+        start_extension()
+
+# Interceptar comandos de controle da extensão
+ext.intercept(Direction.TO_CLIENT, lambda msg: None, "ExtensionConsoleMessage")
+
+# Configurar interceptações de packets
+ext.intercept(Direction.TO_CLIENT, initial_position, "Users")
 ext.intercept(Direction.TO_CLIENT, detect_room_dimensions, "HeightMap")
-# print("✅ [INIT] HeightMap interceptação configurada")
-
-# ADICIONADO: MoveAvatar TO_SERVER para capturar cliques do usuário
+ext.intercept(Direction.TO_CLIENT, detect_floor_dimensions, "FloorHeightMap")
 ext.intercept(Direction.TO_SERVER, capture_move_position, "MoveAvatar")
-# print("✅ [INIT] MoveAvatar TO_SERVER interceptação configurada")
 
-# MANTIDO DESABILITADO: Outras interceptações TO_CLIENT que podem causar problemas
-# ext.intercept(Direction.TO_CLIENT, detect_floor_dimensions, "FloorHeightMap")
-# print("✅ [INIT] FloorHeightMap interceptação configurada")
-
-# ext.intercept(Direction.TO_CLIENT, reset_position_on_room_change, "RoomReady")
-# print("✅ [INIT] RoomReady interceptação configurada")
-
-# MANTIDO DESABILITADO: Interceptações TO_CLIENT com IDs específicos
-# ext.intercept(Direction.TO_CLIENT, capture_move_position, 83)
-# ext.intercept(Direction.TO_CLIENT, capture_move_position, 1982)
-# print("✅ [INIT] MoveAvatar TO_CLIENT interceptações configuradas")
-
+# Inicializar listeners apenas se pynput estiver disponível
 if PYNPUT_AVAILABLE:
-    print("🎹 [INIT] Iniciando listeners de teclado e mouse...")
+    print(" [INIT] Iniciando listeners de teclado e mouse...")
     keyboard_listener = keyboard.Listener(on_press=on_key_press, on_release=on_key_release)
     keyboard_listener.start()
-    print("✅ [INIT] Keyboard listener iniciado")
+    print(" [INIT] Keyboard listener iniciado")
     
     mouse_listener = mouse.Listener(on_click=on_click)
     mouse_listener.start()
-    print("✅ [INIT] Mouse listener iniciado")
+    print(" [INIT] Mouse listener iniciado")
+    
+    print(" [STATUS] Extensão iniciada em modo ATIVO")
+    print(" [INFO] Use as SETAS do teclado para mover o avatar")
+    print(" [INFO] A extensão só responde quando está no modo PLAY")
     
 else:
-    print("❌ [ERROR] PYNPUT não disponível - listeners não iniciados")
-    print("❌ [ERROR] Instale o pynput: pip install pynput")
+    print(" [ERROR] PYNPUT não disponível - listeners não iniciados")
+    print(" [ERROR] Instale o pynput: pip install pynput")
 
 
 
